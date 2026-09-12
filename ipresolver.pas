@@ -91,7 +91,7 @@ begin
           FLock.Enter;
           try
             ip:='';
-            if FResolveIp.Count > 0 then begin
+            if not Terminated and (FResolveIp.Count > 0) then begin
               ip:=FResolveIp[0];
               FResolveIp.Delete(0);
             end;
@@ -173,9 +173,16 @@ destructor TIpResolver.Destroy;
 var
   i: integer;
 begin
-  Terminate;
-  if not Suspended then
+  FLock.Enter;
+  try
+    Terminate;
+  finally
+    FLock.Leave;
+  end;
+  if not Suspended then begin
+    FResolveEvent.SetEvent;
     WaitFor;
+  end;
   FResolveIp.Free;
   FResolveEvent.Free;
   FLock.Free;
