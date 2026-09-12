@@ -56,14 +56,16 @@ type
   private
     FLock: TCriticalSection;
     FResolveEvent: TEvent;
-    FCache: TList;
+    // Objects[] stores PHostEntry pointers. TStringList does not own them;
+    // Destroy disposes each cached entry exactly once.
+    FCache: TStringList;
     FResolveIp: TStringList;
     FGeoIp: TGeoIP;
     FOptions: TResolverOptions;
     FGeoIpCounryDB: string;
   protected
     procedure Execute; override;
-    function NewEntry(const IpAddress: string): PHostEntry;
+    function GetOrCreateEntry(const IpAddress: string; out IsNew: boolean): PHostEntry;
     function FindEntry(const IpAddress: string): PHostEntry;
   public
     constructor Create(const GeoIpCounryDB: string; AOptions: TResolverOptions); reintroduce;
@@ -123,17 +125,26 @@ begin
   Sleep(20);
 end;
 
-function TIpResolver.NewEntry(const IpAddress: string): PHostEntry;
+function TIpResolver.GetOrCreateEntry(const IpAddress: string; out IsNew: boolean): PHostEntry;
+var
+  i: integer;
 begin
   FLock.Enter;
   try
-    New(Result);
-    Result^.ImageIndex:=0;
-    Result^.IP:=IpAddress;
-    UniqueString(Result^.IP);
-    Result^.HostName:=IpAddress;
-    UniqueString(Result^.HostName);
-    FCache.Add(Result);
+    if FCache.Find(IpAddress, i) then begin
+      Result:=PHostEntry(FCache.Objects[i]);
+      IsNew:=False;
+    end
+    else begin
+      New(Result);
+      Result^.ImageIndex:=0;
+      Result^.IP:=IpAddress;
+      UniqueString(Result^.IP);
+      Result^.HostName:=IpAddress;
+      UniqueString(Result^.HostName);
+      FCache.AddObject(Result^.IP, TObject(Result));
+      IsNew:=True;
+    end;
   finally
     FLock.Leave;
   end;
@@ -145,12 +156,10 @@ var
 begin
   FLock.Enter;
   try
-    for i:=0 to FCache.Count - 1 do begin
-      Result:=FCache[i];
-      if Result^.IP = IpAddress then
-        exit;
-    end;
-    Result:=nil;
+    if FCache.Find(IpAddress, i) then
+      Result:=PHostEntry(FCache.Objects[i])
+    else
+      Result:=nil;
   finally
     FLock.Leave;
   end;
@@ -161,7 +170,10 @@ begin
   FOptions:=AOptions;
   FLock:=TCriticalSection.Create;
   FResolveEvent:=TEvent.Create(nil, True, False, '');
-  FCache:=TList.Create;
+  FCache:=TStringList.Create;
+  FCache.CaseSensitive:=True;
+  FCache.Duplicates:=dupIgnore;
+  FCache.Sorted:=True;
   FResolveIp:=TStringList.Create;
   FGeoIpCounryDB:=GeoIpCounryDB;
   if (roResolveCountry in FOptions) and (FGeoIpCounryDB <> '') then
@@ -181,7 +193,7 @@ begin
   FLock.Free;
   FGeoIp.Free;
   for i:=0 to FCache.Count - 1 do
-    Dispose(PHostEntry(FCache[i]));
+    Dispose(PHostEntry(FCache.Objects[i]));
   FCache.Free;
   inherited Destroy;
 end;
@@ -189,12 +201,12 @@ end;
 function TIpResolver.Resolve(const IpAddress: string): PHostEntry;
 var
   GeoCountry: TGeoIPCountry;
+  IsNew: boolean;
 begin
-  Result:=FindEntry(IpAddress);
-  if Result <> nil then
+  Result:=GetOrCreateEntry(IpAddress, IsNew);
+  if not IsNew then
     exit;
 
-  Result:=NewEntry(IpAddress);
   if roResolveIP in FOptions then begin
     FLock.Enter;
     try
