@@ -5011,7 +5011,6 @@ begin
       CheckStatus(False);
       exit;
     end;
-    t:=TJSONArray.Create;
     t:=args.Arrays['torrents'];
     for i:= 0 to t.Count-1 do
       begin
