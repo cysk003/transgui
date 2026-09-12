@@ -105,7 +105,9 @@ type
     function GetRowVisible(RowIndex: integer): boolean;
     function GetSortOrder: TSortOrder;
     procedure ItemsChanged(Sender: TObject);
+    procedure SetImages(const AValue: TImageList);
     procedure SetHideSelection(const AValue: boolean);
+    procedure UpdateDefaultRowHeight;
     procedure SetRow(const AValue: integer);
     procedure SetRowSelected(RowIndex: integer; const AValue: boolean);
     procedure SetRowVisible(RowIndex: integer; const AValue: boolean);
@@ -121,6 +123,7 @@ type
     procedure DoSearchTimer(Sender: TObject);
 
   protected
+    procedure CreateWnd; override;
     procedure SizeChanged(OldColCount, OldRowCount: Integer); override;
     procedure DrawCell(aCol,aRow: Integer; aRect: TRect; aState:TGridDrawState); override;
     procedure ColRowMoved(IsColumn: Boolean; FromIndex,ToIndex: Integer); override;
@@ -230,7 +233,7 @@ type
     property OnGetEditText;
     property OnSetEditText;
 
-    property Images: TImageList read FImages write FImages;
+    property Images: TImageList read FImages write SetImages;
     property MultiSelect: boolean read FMultiSelect write FMultiSelect default False;
     property SortColumn: integer read FSortColumn write SetSortColumn default -1;
     property SortOrder: TSortOrder read GetSortOrder write SetSortOrder default soAscending;
@@ -337,6 +340,41 @@ begin
       MouseMove([], pt.x, pt.y);
   finally
     FItemsChanging:=False;
+  end;
+end;
+
+procedure TVarGrid.SetImages(const AValue: TImageList);
+begin
+  if FImages=AValue then exit;
+  FImages:=AValue;
+  if not (csLoading in ComponentState) then
+    VisualChange;
+end;
+
+procedure TVarGrid.UpdateDefaultRowHeight;
+var
+  HiddenRows: array of boolean;
+  i, RowHeight: integer;
+begin
+  if not HandleAllocated then exit;
+
+  RowHeight:=Canvas.TextHeight('Xy') + 5;
+  if Assigned(FImages) then
+    RowHeight:=Max(RowHeight, FImages.Height + 4);
+  if DefaultRowHeight = RowHeight then exit;
+
+  // Changing DefaultRowHeight resets per-row heights, so retain hidden rows.
+  SetLength(HiddenRows, RowCount);
+  for i:=FixedRows to RowCount - 1 do
+    HiddenRows[i]:=RowHeights[i] = 0;
+  inherited BeginUpdate;
+  try
+    DefaultRowHeight:=RowHeight;
+    for i:=FixedRows to RowCount - 1 do
+      if HiddenRows[i] then
+        RowHeights[i]:=0;
+  finally
+    inherited EndUpdate;
   end;
 end;
 
@@ -573,6 +611,12 @@ procedure TVarGrid.DoSearchTimer(Sender: TObject);
 begin
   FSearchTimer.Enabled:=False;
   FCurSearch:='';
+end;
+
+procedure TVarGrid.CreateWnd;
+begin
+  inherited CreateWnd;
+  UpdateDefaultRowHeight;
 end;
 
 procedure TVarGrid.SizeChanged(OldColCount, OldRowCount: Integer);
@@ -992,8 +1036,7 @@ end;
 procedure TVarGrid.VisualChange;
 begin
   inherited VisualChange;
-  if HandleAllocated then
-    DefaultRowHeight:=Canvas.TextHeight('Xy') + 5;
+  UpdateDefaultRowHeight;
   UpdateColumnsMap;
 end;
 
